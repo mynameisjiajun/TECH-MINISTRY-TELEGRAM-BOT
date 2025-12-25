@@ -1,14 +1,20 @@
 """
-Enhanced Main entry point for the bot
-Combines bot functionality with reminder scheduler and all new features
+Main entry point for the bot
+Combines bot functionality with reminder scheduler and all features
 """
+import sys
+import os
+
+# Add src directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackQueryHandler
 from telegram import Update
 from reminder_scheduler import ReminderScheduler
 import config
 
-# Import from enhanced bot
-from bot_enhanced import (
+# Import from bot
+from bot import (
     start, help_command, my_rentals, rent_start, receive_item_id,
     receive_duration, receive_pickup_photo, return_start, receive_return_choice,
     receive_return_photo, cancel,
@@ -36,10 +42,10 @@ from ux_improvements import (
 )
 
 def main():
-    """Start the bot with all enhancements"""
+    """Start the bot"""
     print("=" * 50)
     print("🙏 Church Tech Ministry Equipment Rental Bot")
-    print("   ENHANCED VERSION with Admin & UX Features")
+    print("   Version 2.1.0")
     print("=" * 50)
     
     # Create the Application

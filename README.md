@@ -2,6 +2,12 @@
 
 A Telegram bot that helps church members rent and return equipment from your tech ministry. The bot integrates with Google Sheets to track inventory and log all transactions.
 
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Status](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)
+
+**Version 2.1.0** - Enhanced with Admin Features & Simplified UX
+
 ## ✨ Features
 
 - 📦 **Easy Equipment Rental** - Users can rent items by providing an Item ID
@@ -109,7 +115,11 @@ Make sure `credentials.json` (downloaded from Google Cloud) is in the project ro
 ### 7. Run the Bot
 
 ```bash
-python main.py
+# Option 1: Using run.py (recommended)
+python run.py
+
+# Option 2: Direct execution
+python src/main.py
 ```
 
 You should see:
