@@ -1,0 +1,105 @@
+# =================================================================
+# ENVIRONMENT CONFIGURATION TEMPLATE
+# =================================================================
+# Copy this to .env and fill in your actual values
+# =================================================================
+
+# ============= REQUIRED SETTINGS =============
+
+# Telegram Bot Token (get from @BotFather on Telegram)
+# Example: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# Google Sheets ID (from the URL of your Google Sheet)
+# Example: 1A2B3C4D5E6F7G8H9I0J
+GOOGLE_SHEETS_ID=your_google_sheets_id_here
+
+# ============= SHEET NAMES =============
+
+# Name of the sheet containing available items inventory
+INVENTORY_SHEET_NAME=Available Items
+
+# Name of the sheet for logging rental transactions
+LOG_SHEET_NAME=Rental Log
+
+# ============= TIMEZONE =============
+
+# Your timezone (for correct date/time calculations)
+# Common values:
+#   Asia/Singapore
+#   Asia/Kuala_Lumpur
+#   Asia/Manila
+#   Asia/Hong_Kong
+#   America/New_York
+#   America/Los_Angeles
+#   Europe/London
+TIMEZONE=Asia/Singapore
+
+# ============= ADMIN CONFIGURATION (NEW!) =============
+
+# Admin user IDs (comma-separated, no spaces)
+# Get your Telegram User ID from @userinfobot on Telegram
+# Example: 123456789,987654321,456789123
+#
+# Admins have access to:
+#   - View all active rentals
+#   - View overdue items
+#   - Send notifications to overdue users
+#   - View usage statistics
+#   - Admin control panel
+#
+# Leave empty to disable admin features
+ADMIN_USER_IDS=
+
+# ============= EQUIPMENT LIST LINK (NEW!) =============
+
+# Public Google Sheet link for users to view equipment
+# Create a view-only link to your "Available Items" sheet
+# 
+# How to create:
+# 1. Open your Google Sheet
+# 2. Click "Share" button
+# 3. Click "Get Link"
+# 4. Set to "Anyone with the link" can VIEW (not edit!)
+# 5. Copy the link and paste below
+#
+# Example: https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0
+#
+# Leave empty if you don't want to share the link
+PUBLIC_SHEET_URL=
+
+# =================================================================
+# EXAMPLE CONFIGURATION
+# =================================================================
+# Here's what a complete configuration might look like:
+#
+# TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz-123456
+# GOOGLE_SHEETS_ID=1A2B3C4D5E6F7G8H9I0J_K1L2M3N4O5P6
+# INVENTORY_SHEET_NAME=Available Items
+# LOG_SHEET_NAME=Rental Log
+# TIMEZONE=Asia/Singapore
+# ADMIN_USER_IDS=123456789,987654321
+# =================================================================
+
+# =================================================================
+# HOW TO GET YOUR TELEGRAM USER ID
+# =================================================================
+# 1. Open Telegram
+# 2. Search for @userinfobot
+# 3. Start a chat and send any message
+# 4. The bot will reply with your User ID (a number)
+# 5. Add that number to ADMIN_USER_IDS above
+# 
+# For multiple admins, separate IDs with commas:
+# ADMIN_USER_IDS=123456789,987654321,456789123
+# =================================================================
+
+# =================================================================
+# NOTES
+# =================================================================
+# - DO NOT commit this file to Git if it contains real credentials
+# - Keep your bot token secret
+# - The .gitignore file should include .env
+# - For deployment, use environment variables instead of .env file
+# =================================================================
+

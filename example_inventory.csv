@@ -1,0 +1,21 @@
+ItemID,Item Name,Type,Brand,Model,Quantity,Location
+CAB001,XLR Cable 3m,Cable,Neutrik,NC3MXX,5,Shelf A1
+CAB002,XLR Cable 5m,Cable,Neutrik,NC3MXX,3,Shelf A1
+CAB003,SDI Cable 10m,Cable,Canare,L-5CFW,3,Shelf A2
+CAB004,HDMI Cable 5m,Cable,Belkin,AV10175,4,Shelf A2
+CAB005,Power Cable IEC,Cable,Generic,IEC-C13,10,Drawer B1
+MIC001,Wireless Microphone,Microphone,Shure,SM58,2,Cabinet C1
+MIC002,Wired Microphone,Microphone,Shure,SM57,3,Cabinet C1
+MIC003,Lavalier Mic,Microphone,Rode,SmartLav+,2,Cabinet C2
+CAM001,HDMI Camera,Camera,Sony,Alpha 6400,1,Cabinet D1
+CAM002,USB Webcam,Camera,Logitech,C920,2,Cabinet D2
+LIGHT001,LED Panel Light,Lighting,Godox,LED500,2,Shelf E1
+LIGHT002,Ring Light,Lighting,Neewer,RL-18,1,Shelf E1
+STAND001,Microphone Stand,Stand,K&M,210/9,5,Storage F1
+STAND002,Camera Tripod,Stand,Manfrotto,MT055,2,Storage F2
+ADAPTER001,HDMI to SDI Converter,Adapter,Blackmagic,Mini Converter,1,Drawer G1
+ADAPTER002,USB-C Hub,Adapter,Anker,PowerExpand,3,Drawer G1
+MONITOR001,Field Monitor 7inch,Monitor,Feelworld,F7,1,Cabinet H1
+RECORDER001,Audio Recorder,Recorder,Zoom,H6,1,Cabinet H2
+MIXER001,Audio Mixer,Mixer,Behringer,X32,1,Main Stage Cabinet
+
