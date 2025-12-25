@@ -1,2 +1,4 @@
-worker: python main.py
+worker: python run.py
+
+
 

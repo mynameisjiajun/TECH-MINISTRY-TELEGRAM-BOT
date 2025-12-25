@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-Main entry point to run the Church Tech Ministry Telegram Bot
+Main entry point for the bot with proper logging
 """
 import sys
 import os
 
-# Add src directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add src directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
-# Import and run main
+# Import main
 from main import main
 
 if __name__ == '__main__':
+    # Force unbuffered output for better logging
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 1)
+    sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 1)
+    
+    print("🚀 Starting bot with unbuffered logging...")
+    print("=" * 50)
+    
     main()
-

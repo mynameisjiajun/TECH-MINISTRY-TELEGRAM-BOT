@@ -6,8 +6,24 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import config
 
+# Import verified users check from bot module
+def is_user_verified(user_id):
+    """Check if user has entered correct password - imports from bot"""
+    from bot import verified_users
+    return user_id in verified_users
+
 async def send_equipment_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send the public Google Sheet link to view equipment"""
+    user = update.effective_user
+    
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
+        )
+        return
     
     if not config.PUBLIC_SHEET_URL:
         await update.message.reply_text(

@@ -59,8 +59,7 @@ async def view_all_rentals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     try:
-        all_logs = sheets.log_sheet.get_all_records()
-        active_rentals = [log for log in all_logs if log.get('Status', '').upper() == 'ACTIVE']
+        active_rentals = sheets.get_all_active_rentals()
         
         if not active_rentals:
             await query.edit_message_text("✅ No active rentals at the moment!")
@@ -94,20 +93,19 @@ async def view_overdue_items(update: Update, context: ContextTypes.DEFAULT_TYPE)
         tz = pytz.timezone(config.TIMEZONE)
         today = datetime.now(tz).date()
         
-        all_logs = sheets.log_sheet.get_all_records()
+        active_rentals = sheets.get_all_active_rentals()
         overdue_rentals = []
         
-        for log in all_logs:
-            if log.get('Status', '').upper() == 'ACTIVE':
-                expected_return = log.get('Expected Return Date', '')
-                try:
-                    return_date = datetime.strptime(expected_return, '%Y-%m-%d').date()
-                    if return_date < today:
-                        days_overdue = (today - return_date).days
-                        log['_days_overdue'] = days_overdue
-                        overdue_rentals.append(log)
-                except:
-                    continue
+        for log in active_rentals:
+            expected_return = log.get('Expected Return Date', '')
+            try:
+                return_date = datetime.strptime(expected_return, '%Y-%m-%d').date()
+                if return_date < today:
+                    days_overdue = (today - return_date).days
+                    log['_days_overdue'] = days_overdue
+                    overdue_rentals.append(log)
+            except:
+                continue
         
         if not overdue_rentals:
             await query.edit_message_text(
@@ -220,14 +218,9 @@ async def admin_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("📈 Statistics", callback_data="admin_stats"),
-            InlineKeyboardButton("👥 User Activity", callback_data="admin_users")
+            InlineKeyboardButton("� Notify Overdue", callback_data="admin_notify_overdue")
         ],
         [
-            InlineKeyboardButton("🔄 Force Return", callback_data="admin_force_return"),
-            InlineKeyboardButton("🔍 Search User", callback_data="admin_search_user")
-        ],
-        [
-            InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast"),
             InlineKeyboardButton("❌ Close", callback_data="admin_close")
         ]
     ]

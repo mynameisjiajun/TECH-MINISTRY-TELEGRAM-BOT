@@ -15,10 +15,10 @@ import config
 
 # Import from bot
 from bot import (
-    start, help_command, my_rentals, rent_start, receive_item_id,
+    start, help_command, my_rentals, rent_start, receive_item_id, receive_quantity,
     receive_duration, receive_pickup_photo, return_start, receive_return_choice,
-    receive_return_photo, cancel,
-    WAITING_FOR_ITEM_ID, WAITING_FOR_DURATION, WAITING_FOR_DURATION_CUSTOM,
+    receive_return_photo, cancel, receive_password,
+    WAITING_FOR_PASSWORD, WAITING_FOR_ITEM_ID, WAITING_FOR_QUANTITY, WAITING_FOR_DURATION, WAITING_FOR_DURATION_CUSTOM,
     WAITING_FOR_PICKUP_PHOTO, WAITING_FOR_RETURN_CHOICE, WAITING_FOR_RETURN_PHOTO,
     handle_duration_selection,
     rent_cancel_callback, return_cancel_callback,
@@ -35,12 +35,6 @@ from admin_commands import (
     admin_back, admin_close, notify_overdue_users
 )
 
-# Import UX improvements
-from ux_improvements import (
-    browse_items, show_category_items, browse_back, browse_cancel,
-    start_rent_from_browse
-)
-
 def main():
     """Start the bot"""
     print("=" * 50)
@@ -51,8 +45,20 @@ def main():
     # Create the Application
     application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     
+    # Verification conversation handler for /start
+    verification_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            WAITING_FOR_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password),
+            ],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+        allow_reentry=True,
+    )
+    
     # Command handlers
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(verification_conv_handler)
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("myrentals", my_rentals))
     application.add_handler(CommandHandler("list", send_equipment_list))
@@ -60,15 +66,21 @@ def main():
     # Admin commands
     application.add_handler(CommandHandler("admin", admin_panel))
     
-    # Rental conversation handler with inline keyboards
+    # Rental conversation handler with inline keyboards and password verification
     rental_conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('rent', rent_start),
             CallbackQueryHandler(quick_rent_callback, pattern='^quick_rent$')
         ],
         states={
+            WAITING_FOR_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password),
+            ],
             WAITING_FOR_ITEM_ID: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_item_id),
+            ],
+            WAITING_FOR_QUANTITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_quantity),
             ],
             WAITING_FOR_DURATION: [
                 CallbackQueryHandler(handle_duration_selection, pattern='^duration_'),
@@ -82,8 +94,10 @@ def main():
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('rent', rent_start),  # Allow /rent to restart anytime
             CallbackQueryHandler(rent_cancel_callback, pattern='^rent_cancel$')
         ],
+        allow_reentry=True,  # Allow /rent to work even during an active conversation
     )
     
     # Return conversation handler with inline keyboards
@@ -102,8 +116,10 @@ def main():
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('return', return_start),  # Allow /return to restart anytime
             CallbackQueryHandler(return_cancel_callback, pattern='^return_cancel$')
         ],
+        allow_reentry=True,  # Allow /return to work even during an active conversation
     )
     
     application.add_handler(rental_conv_handler)

@@ -17,199 +17,331 @@ import pytz
 import config
 from sheets_manager import SheetsManager
 from admin_commands import is_admin
-from ux_improvements import (
-    browse_items, show_category_items, browse_back, 
-    browse_cancel, start_rent_from_browse
-)
 
 # Conversation states
+WAITING_FOR_PASSWORD = 0
 WAITING_FOR_ITEM_ID = 1
-WAITING_FOR_DURATION = 2
-WAITING_FOR_DURATION_CUSTOM = 3
-WAITING_FOR_PICKUP_PHOTO = 4
-WAITING_FOR_RETURN_CHOICE = 5
-WAITING_FOR_RETURN_PHOTO = 6
+WAITING_FOR_QUANTITY = 2
+WAITING_FOR_DURATION = 3
+WAITING_FOR_DURATION_CUSTOM = 4
+WAITING_FOR_PICKUP_PHOTO = 5
+WAITING_FOR_RETURN_CHOICE = 6
+WAITING_FOR_RETURN_PHOTO = 7
 
 # Initialize Sheets Manager
 sheets = SheetsManager()
+
+# Password for verification (from config/env)
+VERIFICATION_PASSWORD = config.VERIFICATION_PASSWORD
+
+# Store verified users (in-memory, resets when bot restarts)
+verified_users = set()
+
+# Helper Functions for Validation
+def validate_quantity_input(quantity_str, max_available):
+    """
+    Validate quantity input from user
+    Returns: (quantity: int, error_message: str or None)
+    """
+    try:
+        qty = int(quantity_str)
+        
+        if qty < 1:
+            return None, "❌ Quantity must be at least 1."
+        
+        if qty > max_available:
+            return None, f"❌ Only {max_available} unit(s) available."
+        
+        if qty > 50:
+            return None, "❌ Maximum 50 units per rental. For bulk orders, contact @mynameisjiajun"
+        
+        return qty, None
+    except ValueError:
+        return None, "❌ Please enter a valid number (e.g., 1, 2, 3)"
+
+def validate_duration_input(days_str):
+    """
+    Validate duration input from user
+    Returns: (days: int, error_message: str or None)
+    """
+    try:
+        days = int(days_str)
+        
+        if days < 1:
+            return None, "❌ Duration must be at least 1 day."
+        
+        if days > 90:
+            return None, "❌ Maximum rental period is 90 days. Contact @mynameisjiajun for longer rentals."
+        
+        return days, None
+    except ValueError:
+        return None, "❌ Please enter a valid number of days (e.g., 7, 14, 30)"
+
+def is_user_verified(user_id):
+    """Check if user has entered correct password"""
+    return user_id in verified_users
+
+def verify_user(user_id):
+    """Mark user as verified"""
+    verified_users.add(user_id)
+
+async def check_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check if user is verified, if not ask for password"""
+    user = update.effective_user
+    
+    if not is_user_verified(user.id):
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please enter the password to use this bot:\n\n"
+            "Type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+        return WAITING_FOR_PASSWORD
+    
+    return None
+
+async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process password input"""
+    user = update.effective_user
+    password = update.message.text.strip()
+    
+    if password == VERIFICATION_PASSWORD:
+        verify_user(user.id)
+        
+        # Check if user was trying to rent before verification
+        after_verify = context.user_data.get('after_verify')
+        
+        if after_verify == 'rent':
+            # Clear the after_verify flag
+            context.user_data.pop('after_verify', None)
+            
+            # Check if user has overdue items
+            has_overdue, overdue_rental = sheets.user_has_overdue_items(user.id)
+            if has_overdue:
+                await update.message.reply_text(
+                    "✅ *Verification Successful!*\n\n"
+                    f"However, you have an overdue item that must be returned first:\n\n"
+                    f"📦 Item: {overdue_rental.get('Item Name', 'Unknown')}\n"
+                    f"🆔 ID: `{overdue_rental.get('Item ID', 'N/A')}`\n"
+                    f"🗓️ Was due: {overdue_rental.get('Expected Return Date', 'N/A')}\n\n"
+                    "⚠️ Please return this item before renting more equipment.\n\n"
+                    "Use /return to return your overdue item.",
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
+            
+            # Continue to rental process
+            await update.message.reply_text(
+                "✅ *Verification Successful!*\n\n"
+                "🎯 *Let's rent some equipment!*\n\n"
+                "Enter the *Item ID* (e.g., CAB001)\n\n"
+                "💡 Use /list for equipment list\n"
+                "Type /cancel to cancel.",
+                parse_mode='Markdown'
+            )
+            return WAITING_FOR_ITEM_ID
+        else:
+            # Just verified via /start, show welcome message  
+            user = update.effective_user
+            welcome_message = f"""
+✅ *Verification Successful!*
+
+Welcome {user.first_name}! 👋
+
+I help you rent and return tech equipment easily!
+
+*📋 Available Commands:*
+
+🎯 *Main Commands:*
+• /rent - Rent equipment
+• /return - Return equipment
+• /myrentals - View your active rentals
+• /list - Get equipment list link
+
+ℹ️ *Information:*
+• /help - Detailed help guide
+• /cancel - Cancel current operation
+
+*✨ Quick Start:*
+1️⃣ Use /list to see available items
+2️⃣ Use /rent to start renting
+3️⃣ I'll guide you through the rest!
+
+💡 You can rent the same item multiple times!
+
+📦 *Need to loan items in bulk?*
+Contact @mynameisjiajun for bulk loan arrangements.
+            """
+            
+            if is_admin(user.id):
+                welcome_message += "\n\n🔧 *Admin:* /admin - Admin panel"
+            
+            await update.message.reply_text(
+                welcome_message,
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+    else:
+        await update.message.reply_text(
+            "❌ *Incorrect Password*\n\n"
+            "Please try again or type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+        return WAITING_FOR_PASSWORD
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
     user = update.effective_user
     
-    # Create inline keyboard for main menu
-    keyboard = [
-        [InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")],
-        [InlineKeyboardButton("📋 My Rentals", callback_data="main_myrentals")],
-        [InlineKeyboardButton("📄 View Equipment List", callback_data="view_sheet")],
-        [InlineKeyboardButton("📖 Help", callback_data="main_help")]
-    ]
-    
-    # Add admin button if user is admin
-    if is_admin(user.id):
-        keyboard.append([InlineKeyboardButton("🔧 Admin Panel", callback_data="main_admin")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Welcome to Church Tech Ministry Equipment Rental Bot!\n\n"
+            "Please enter the password to continue:\n\n"
+            "Type /cancel if you don't have the password.",
+            parse_mode='Markdown'
+        )
+        return WAITING_FOR_PASSWORD
     
     welcome_message = f"""
 🙏 *Welcome to Church Tech Ministry Equipment Rental Bot!*
 
 Hello {user.first_name}! 👋
 
-Use the buttons below to get started, or try these commands:
+I help you rent and return tech equipment easily!
 
-📋 *Quick Commands:*
-/rent - Rent equipment (enter Item ID)
-/list - View all available equipment
-/myrentals - View your active rentals
-/return - Return equipment early
-/help - Get help
+*📋 Available Commands:*
+
+🎯 *Main Commands:*
+• /rent - Rent equipment
+• /return - Return equipment
+• /myrentals - View your active rentals
+• /list - Get equipment list link
+
+ℹ️ *Information:*
+• /help - Detailed help guide
+• /cancel - Cancel current operation
+
+*✨ Quick Start:*
+1️⃣ Use /list to see available items
+2️⃣ Use /rent to start renting
+3️⃣ I'll guide you through the rest!
+
+💡 You can rent the same item multiple times!
+
+📦 *Need to loan items in bulk?*
+Contact @mynameisjiajun for bulk loan arrangements.
     """
     
     if is_admin(user.id):
-        welcome_message += "\n🔧 /admin - Admin control panel"
+        welcome_message += "\n\n🔧 *Admin:* /admin - Admin panel"
     
     await update.message.reply_text(
         welcome_message, 
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        parse_mode='Markdown'
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /help is issued."""
+    user = update.effective_user
+    
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
+        )
+        return
+    
     help_text = """
-📖 *How to Use This Bot*
+📖 *Equipment Rental Guide*
 
-*Renting Equipment:*
-1️⃣ Use /list to view all available equipment
-2️⃣ Note the Item ID you want (e.g., CAB001)
-3️⃣ Use /rent and enter the Item ID
-4️⃣ Choose rental duration
-5️⃣ Take a photo of the item you're picking up
-6️⃣ Done! Equipment is yours!
+*🎯 How to Rent Equipment:*
 
-*Returning Equipment:*
-1️⃣ Use /return command
-2️⃣ Select which item to return
+1️⃣ View available items: /list
+2️⃣ Start rental process: /rent
+3️⃣ Enter Item ID (e.g., CAB001)
+   • Item IDs are not case sensitive!
+4️⃣ Select rental duration
+5️⃣ Take a photo of the item
+6️⃣ Done! Rental logged ✅
+
+*🔄 How to Return Equipment:*
+
+1️⃣ Start return process: /return
+2️⃣ Select item from your rentals
 3️⃣ Take a photo of the returned item
-4️⃣ Done!
+4️⃣ Remember to return to the correct location!
+5️⃣ Done! Return logged ✅
 
-*Other Commands:*
-• /list - View equipment list (Google Sheet)
-• /myrentals - See your active rentals
-• /help - Show this help message
+*📦 Managing Your Rentals:*
 
-📅 You'll receive a reminder 1 day before your return date!
+• /myrentals - See all your active rentals
+• You can rent the same item multiple times
+• Each rental is tracked separately
+• You'll get a reminder 1 day before due date
 
-Need assistance? Contact your tech ministry leader! 🙏
+*💬 Commands List:*
+
+• /rent - Rent equipment
+• /return - Return equipment  
+• /myrentals - View active rentals
+• /list - Get equipment list
+• /cancel - Cancel current action
+• /help - Show this guide
+
+*📞 Need Help?*
+
+For bulk requests or special arrangements, contact:
+👤 @mynameisjiajun
+
+🙏 Thank you for serving!
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def rent_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start the rental process"""
-    keyboard = []
+    user = update.effective_user
     
-    # Add equipment list button if URL is configured
-    if config.PUBLIC_SHEET_URL:
-        keyboard.append([InlineKeyboardButton("📄 View Equipment List", url=config.PUBLIC_SHEET_URL)])
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        # Store that user wants to rent after verification
+        context.user_data['after_verify'] = 'rent'
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please enter the password to use this bot:\n\n"
+            "Type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+        return WAITING_FOR_PASSWORD
     
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rent_cancel")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = "🎯 *Let's rent some equipment!*\n\n"
-    
-    if config.PUBLIC_SHEET_URL:
-        message += "📄 Click the button below to view all available equipment.\n\n"
-    
-    message += "📝 *Please enter the Item ID* you want to rent (e.g., CAB001, MIC001)\n\n"
-    message += "Type /cancel to cancel this operation."
+    # Check if user has overdue items
+    has_overdue, overdue_rental = sheets.user_has_overdue_items(user.id)
+    if has_overdue:
+        await update.message.reply_text(
+            f"❌ *You have an overdue item that must be returned first:*\n\n"
+            f"📦 Item: {overdue_rental.get('Item Name', 'Unknown')}\n"
+            f"🆔 ID: `{overdue_rental.get('Item ID', 'N/A')}`\n"
+            f"🗓️ Was due: {overdue_rental.get('Expected Return Date', 'N/A')}\n\n"
+            "⚠️ Please return this item before renting more equipment.\n\n"
+            "Use /return to return your overdue item.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     
     await update.message.reply_text(
-        message,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-    
-    return WAITING_FOR_ITEM_ID
-
-async def rent_browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle browse button in rent flow"""
-    query = update.callback_query
-    await query.answer()
-    
-    # Redirect to browse functionality
-    await browse_items_inline(query, context)
-    return WAITING_FOR_ITEM_ID
-
-async def browse_items_inline(query, context):
-    """Browse items inline (for callback)"""
-    try:
-        all_items = sheets.inventory_sheet.get_all_records()
-        
-        if not all_items:
-            await query.edit_message_text("❌ No items found in inventory.")
-            return
-        
-        # Get unique categories
-        categories = {}
-        for item in all_items:
-            item_type = item.get('Type', 'Other')
-            if item_type not in categories:
-                categories[item_type] = []
-            categories[item_type].append(item)
-        
-        # Create keyboard with categories
-        keyboard = []
-        category_emojis = {
-            'Cable': '🔌',
-            'Microphone': '🎤',
-            'Camera': '🎥',
-            'Lighting': '💡',
-            'Stand': '🎚️',
-            'Adapter': '🔄',
-            'Monitor': '📺',
-            'Recorder': '⏺️',
-            'Mixer': '🎛️',
-            'Other': '📦'
-        }
-        
-        for category in sorted(categories.keys()):
-            emoji = category_emojis.get(category, '📦')
-            count = len(categories[category])
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{emoji} {category} ({count})",
-                    callback_data=f"browse_category_{category}"
-                )
-            ])
-        
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rent_cancel")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "📦 *Browse Equipment*\n\n"
-            "Select a category to view available items:",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        
-    except Exception as e:
-        await query.edit_message_text(f"❌ Error loading items: {e}")
-
-async def rent_manual_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle manual Item ID entry"""
-    query = update.callback_query
-    await query.answer()
-    
-    await query.edit_message_text(
-        "🔍 *Enter Item ID*\n\n"
-        "Please type the Item ID (e.g., CAB001, MIC001)\n\n"
-        "Type /cancel to cancel this operation.",
+        "🎯 *Let's rent some equipment!*\n\n"
+        "Enter the *Item ID* (e.g., CAB001)\n\n"
+        "💡 Use /list for equipment list\n"
+        "Type /cancel to cancel.",
         parse_mode='Markdown'
     )
     
     return WAITING_FOR_ITEM_ID
+
+# Removed broken browse functions - use /list command instead
 
 async def receive_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process the item ID provided by user"""
@@ -227,9 +359,13 @@ async def receive_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_FOR_ITEM_ID
     
     if not available:
+        # Item is out of stock - check Quantity Current
+        quantity_current = int(item.get('Quantity Current', 0))
+        
         await update.message.reply_text(
-            f"❌ Sorry, *{item.get('Item Name')}* (ID: `{item_id}`) is currently not available.\n\n"
-            f"All units are currently rented out. Please try again later or choose a different item.\n\n"
+            f"❌ Sorry, *{item.get('Item Name')}* (ID: `{item_id}`) is currently OUT OF STOCK.\n\n"
+            f"📊 Current Stock: {quantity_current}\n\n"
+            "This item cannot be rented at the moment. Please choose a different item or try again later.\n\n"
             "Type /cancel to cancel this operation.",
             parse_mode='Markdown'
         )
@@ -242,6 +378,48 @@ async def receive_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['rental_item_brand'] = item.get('Brand')
     context.user_data['rental_item_model'] = item.get('Model')
     context.user_data['rental_item_location'] = item.get('Location')
+    context.user_data['rental_item_max_quantity'] = quantity
+    
+    # Ask for quantity
+    quantity_msg = f"""
+✅ *Item Found!*
+
+📦 *Item Details:*
+• ID: `{item_id}`
+• Name: {item.get('Item Name')}
+• Type: {item.get('Type')}
+• Brand: {item.get('Brand', 'N/A')}
+• Model: {item.get('Model', 'N/A')}
+• Available Units: {quantity}
+
+🔢 *How many units do you need?*
+
+Enter a number between 1 and {quantity}
+
+Type /cancel to cancel this operation.
+    """
+    
+    await update.message.reply_text(quantity_msg, parse_mode='Markdown')
+    return WAITING_FOR_QUANTITY
+
+async def receive_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process the quantity provided by user"""
+    quantity_input = update.message.text.strip()
+    max_quantity = context.user_data.get('rental_item_max_quantity', 1)
+    
+    # Validate quantity using helper function
+    quantity, error_msg = validate_quantity_input(quantity_input, max_quantity)
+    
+    if error_msg:
+        await update.message.reply_text(
+            f"{error_msg}\n\n"
+            f"Please enter a number between 1 and {max_quantity}\n\n"
+            "Type /cancel to cancel this operation."
+        )
+        return WAITING_FOR_QUANTITY
+    
+    # Store quantity
+    context.user_data['rental_quantity'] = quantity
     
     # Create duration selection keyboard
     keyboard = [
@@ -259,23 +437,15 @@ async def receive_item_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Show item details and ask for duration
-    item_details = f"""
-✅ *Item Found!*
+    # Show duration selection
+    duration_msg = f"""
+✅ *Quantity: {quantity} unit(s)*
 
-📦 *Item Details:*
-• ID: `{item_id}`
-• Name: {item.get('Item Name')}
-• Type: {item.get('Type')}
-• Brand: {item.get('Brand', 'N/A')}
-• Model: {item.get('Model', 'N/A')}
-• Available Units: {quantity}
-
-⏱️ *How long do you need this item?*
-Select a duration:
+⏱️ *How long do you need {'this item' if quantity == 1 else 'these items'}?*
+Select a rental duration:
     """
     
-    await update.message.reply_text(item_details, parse_mode='Markdown', reply_markup=reply_markup)
+    await update.message.reply_text(duration_msg, parse_mode='Markdown', reply_markup=reply_markup)
     return WAITING_FOR_DURATION
 
 async def handle_duration_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -299,24 +469,20 @@ async def handle_duration_selection(update: Update, context: ContextTypes.DEFAUL
 
 async def receive_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process custom duration text input"""
-    try:
-        duration = int(update.message.text.strip())
-        
-        if duration <= 0:
-            await update.message.reply_text(
-                "❌ Please enter a valid number of days (greater than 0).\n"
-                "Type /cancel to cancel this operation."
-            )
-            return WAITING_FOR_DURATION_CUSTOM
-        
-        return await process_duration(update, context, duration, is_callback=False)
-        
-    except ValueError:
+    duration_input = update.message.text.strip()
+    
+    # Validate duration using helper function
+    duration, error_msg = validate_duration_input(duration_input)
+    
+    if error_msg:
         await update.message.reply_text(
-            "❌ Please enter a valid number (e.g., 3 for 3 days).\n"
+            f"{error_msg}\n\n"
+            "Please enter a valid number of days (e.g., 7, 14, 30).\n\n"
             "Type /cancel to cancel this operation."
         )
         return WAITING_FOR_DURATION_CUSTOM
+    
+    return await process_duration(update, context, duration, is_callback=False)
 
 async def process_duration(update_or_query, context, duration, is_callback=True):
     """Process the rental duration and ask for photo"""
@@ -359,6 +525,24 @@ async def receive_pickup_photo(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return WAITING_FOR_PICKUP_PHOTO
     
+    # DOUBLE-CHECK availability before finalizing (prevent race conditions)
+    item_id = context.user_data['rental_item_id']
+    requested_qty = context.user_data.get('rental_quantity', 1)
+    
+    available, current_qty, item = sheets.check_availability(item_id)
+    
+    if not available or current_qty < requested_qty:
+        await update.message.reply_text(
+            f"❌ *Sorry, this item is no longer available!*\n\n"
+            f"Someone else may have rented it while you were completing your request.\n\n"
+            f"📊 Current Stock: {current_qty}\n"
+            f"📦 You requested: {requested_qty}\n\n"
+            "Please start over with /rent and check current availability.",
+            parse_mode='Markdown'
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    
     # Get the photo (highest resolution)
     photo = update.message.photo[-1]
     photo_file = await photo.get_file()
@@ -378,35 +562,34 @@ async def receive_pickup_photo(update: Update, context: ContextTypes.DEFAULT_TYP
         item_name=context.user_data['rental_item_name'],
         rental_start=context.user_data['rental_start'],
         expected_return=context.user_data['rental_return'],
-        pickup_photo_url=photo_url
+        pickup_photo_url=photo_url,
+        quantity=context.user_data.get('rental_quantity', 1)
     )
     
     if success:
-        # Create keyboard for quick actions
-        keyboard = [
-            [InlineKeyboardButton("📋 My Rentals", callback_data="main_myrentals")],
-            [InlineKeyboardButton("🎯 Rent Another", callback_data="quick_rent")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
+        rental_quantity = context.user_data.get('rental_quantity', 1)
         confirmation_msg = f"""
 ✅ *Rental Confirmed!*
 
 📦 Item: {context.user_data['rental_item_name']}
 🆔 Item ID: `{context.user_data['rental_item_id']}`
+📦 Quantity: {rental_quantity}
 📅 Duration: {context.user_data['rental_duration']} day(s)
 🗓️ Return by: {context.user_data['rental_return']}
 📍 Location: {context.user_data['rental_item_location']}
 
 🔔 You'll receive a reminder 1 day before the return date.
 
-To return early, use /return command.
+*What's next?*
+• To view all your rentals: /myrentals
+• To rent another item: /rent
+• To return this item early: /return
+
 Thank you! 🙏
         """
         await update.message.reply_text(
             confirmation_msg, 
-            parse_mode='Markdown',
-            reply_markup=reply_markup
+            parse_mode='Markdown'
         )
     else:
         await update.message.reply_text(
@@ -421,58 +604,75 @@ async def my_rentals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user's active rentals with inline keyboard"""
     user = update.effective_user
     
-    rentals = sheets.get_active_rentals_by_user(user.id)
-    
-    if not rentals:
-        keyboard = [
-            [InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")],
-            [InlineKeyboardButton("📦 Browse", callback_data="main_browse")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
+    # Check if user is verified
+    if not is_user_verified(user.id):
         await update.message.reply_text(
-            "📭 You have no active rentals.\n\n"
-            "Ready to rent some equipment?",
-            reply_markup=reply_markup
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
         )
         return
     
-    message = "📦 *Your Active Rentals:*\n\n"
+    rentals = sheets.get_active_rentals_by_user(user.id)
+    
+    if not rentals:
+        await update.message.reply_text(
+            "📭 You have no active rentals.\n\n"
+            "Ready to rent some equipment?\n\n"
+            "• Use /list to see equipment list\n"
+            "• Use /rent to start renting",
+            parse_mode='Markdown'
+        )
+        return
+    
+    message = f"📦 *Your Active Rentals ({len(rentals)} item{'s' if len(rentals) > 1 else ''}):*\n\n"
     
     for idx, rental in enumerate(rentals, 1):
-        message += f"""
-{idx}. *{rental.get('Item Name')}*
-   • ID: `{rental.get('Item ID')}`
-   • Rented: {rental.get('Rental Start Date')}
-   • Due: {rental.get('Expected Return Date')}
-   
-"""
+        item_name = rental.get('Item Name', 'Unknown Item')
+        item_id = rental.get('Item ID', 'N/A')
+        quantity = rental.get('Quantity', 1)
+        rental_start = rental.get('Rental Start Date', 'N/A')
+        expected_return = rental.get('Expected Return Date', 'N/A')
+        location = rental.get('Location', 'Unknown')
+        
+        message += f"{idx}. *{item_name}*\n"
+        message += f"   🆔 ID: `{item_id}`\n"
+        message += f"   📦 Quantity: {quantity}\n"
+        message += f"   📍 Location: {location}\n"
+        message += f"   📅 Rented: {rental_start}\n"
+        message += f"   🗓️ Due: {expected_return}\n"
+        message += f"\n"
     
-    keyboard = [
-        [InlineKeyboardButton("🔄 Return Item", callback_data="main_return")],
-        [InlineKeyboardButton("🎯 Rent More", callback_data="quick_rent")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    message += "─────────────────\n"
+    message += "*💡 Tips:*\n"
+    message += "• You can rent the same item multiple times\n"
+    message += "• Each rental is tracked separately\n"
+    message += "• Use /return when you're ready to return\n"
+    message += "• Use /rent to rent more items"
     
     await update.message.reply_text(
         message, 
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        parse_mode='Markdown'
     )
 
 async def return_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start the return process with inline keyboard"""
+    """Start the return process"""
     user = update.effective_user
+    
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await update.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     
     rentals = sheets.get_active_rentals_by_user(user.id)
     
     if not rentals:
-        keyboard = [[InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await update.message.reply_text(
-            "📭 You have no active rentals to return.",
-            reply_markup=reply_markup
+            "📭 You have no active rentals to return."
         )
         return ConversationHandler.END
     
@@ -517,9 +717,15 @@ async def receive_return_choice(update: Update, context: ContextTypes.DEFAULT_TY
     selected_rental = rentals[idx]
     context.user_data['return_rental'] = selected_rental
     
+    location = selected_rental.get('Location', 'the designated area')
+    quantity = selected_rental.get('Quantity', 1)
+    
     await query.edit_message_text(
-        f"📸 *Returning: {selected_rental.get('Item Name')}*\n\n"
-        f"Please take a photo of the item to confirm return.\n\n"
+        f"📸 *Returning: {selected_rental.get('Item Name')}*\n"
+        f"🆔 Item ID: `{selected_rental.get('Item ID')}`\n"
+        f"📦 Quantity: {quantity}\n"
+        f"📍 Return to: *{location}*\n\n"
+        f"⚠️ Please return {'the item' if quantity == 1 else 'all items'} to *{location}* and take a photo to confirm.\n\n"
         "Type /cancel to cancel this operation.",
         parse_mode='Markdown'
     )
@@ -548,20 +754,21 @@ async def receive_return_photo(update: Update, context: ContextTypes.DEFAULT_TYP
     success = sheets.complete_return(row_number, photo_url)
     
     if success:
-        # Create quick action keyboard
-        keyboard = [
-            [InlineKeyboardButton("📋 My Rentals", callback_data="main_myrentals")],
-            [InlineKeyboardButton("🎯 Rent Again", callback_data="quick_rent")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        location = rental.get('Location', 'the designated area')
+        quantity = rental.get('Quantity', 1)
         
         await update.message.reply_text(
             f"✅ *Return Confirmed!*\n\n"
             f"📦 Item: {rental.get('Item Name')}\n"
-            f"🆔 Item ID: `{rental.get('Item ID')}`\n\n"
-            f"Thank you for returning the equipment! 🙏",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
+            f"🆔 Item ID: `{rental.get('Item ID')}`\n"
+            f"📦 Quantity: {quantity}\n"
+            f"📍 Location: *{location}*\n\n"
+            f"⚠️ *Please return {'the item' if quantity == 1 else 'all items'} to: {location}*\n\n"
+            f"Thank you for returning the equipment! 🙏\n\n"
+            f"*What's next?*\n"
+            f"• To rent another item: /rent\n"
+            f"• To view your rentals: /myrentals",
+            parse_mode='Markdown'
         )
     else:
         await update.message.reply_text(
@@ -576,16 +783,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the current operation"""
     context.user_data.clear()
     
-    keyboard = [
-        [InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")],
-        [InlineKeyboardButton("📦 Browse", callback_data="main_browse")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
         "❌ Operation cancelled.\n\n"
-        "What would you like to do?",
-        reply_markup=reply_markup
+        "*What would you like to do?*\n"
+        "• Use /rent to rent equipment\n"
+        "• Use /return to return items\n"
+        "• Use /myrentals to view your rentals\n"
+        "• Use /list to see equipment list",
+        parse_mode='Markdown'
     )
     return ConversationHandler.END
 
@@ -595,16 +800,14 @@ async def rent_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     context.user_data.clear()
     
-    keyboard = [
-        [InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")],
-        [InlineKeyboardButton("📦 Browse", callback_data="main_browse")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await query.edit_message_text(
         "❌ Rental cancelled.\n\n"
-        "What would you like to do?",
-        reply_markup=reply_markup
+        "*What would you like to do?*\n"
+        "• Use /rent to rent equipment\n"
+        "• Use /return to return items\n"
+        "• Use /myrentals to view your rentals\n"
+        "• Use /list to see equipment list",
+        parse_mode='Markdown'
     )
     return ConversationHandler.END
 
@@ -618,14 +821,8 @@ async def return_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 # Main menu callback handlers
-async def main_browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle browse from main menu"""
-    query = update.callback_query
-    await query.answer()
-    await browse_items_inline(query, context)
-
 async def main_myrentals_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle my rentals from main menu"""
+    """Handle my rentals from main menu - simplified"""
     query = update.callback_query
     await query.answer()
     
@@ -633,40 +830,41 @@ async def main_myrentals_callback(update: Update, context: ContextTypes.DEFAULT_
     rentals = sheets.get_active_rentals_by_user(user.id)
     
     if not rentals:
-        keyboard = [
-            [InlineKeyboardButton("🎯 Rent Equipment", callback_data="quick_rent")],
-            [InlineKeyboardButton("📦 Browse", callback_data="main_browse")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await query.edit_message_text(
             "📭 You have no active rentals.\n\n"
-            "Ready to rent some equipment?",
-            reply_markup=reply_markup
+            "Ready to rent some equipment?\n\n"
+            "• Use /list to see equipment list\n"
+            "• Use /rent to start renting",
+            parse_mode='Markdown'
         )
         return
     
-    message = "📦 *Your Active Rentals:*\n\n"
+    message = f"📦 *Your Active Rentals ({len(rentals)} item{'s' if len(rentals) > 1 else ''}):*\n\n"
     
     for idx, rental in enumerate(rentals, 1):
-        message += f"""
-{idx}. *{rental.get('Item Name')}*
-   • ID: `{rental.get('Item ID')}`
-   • Rented: {rental.get('Rental Start Date')}
-   • Due: {rental.get('Expected Return Date')}
-   
-"""
+        item_name = rental.get('Item Name', 'Unknown Item')
+        item_id = rental.get('Item ID', 'N/A')
+        rental_start = rental.get('Rental Start Date', 'N/A')
+        expected_return = rental.get('Expected Return Date', 'N/A')
+        location = rental.get('Location', 'Unknown')
+        
+        message += f"{idx}. *{item_name}*\n"
+        message += f"   🆔 ID: `{item_id}`\n"
+        message += f"   📍 Location: {location}\n"
+        message += f"   📅 Rented: {rental_start}\n"
+        message += f"   🗓️ Due: {expected_return}\n"
+        message += f"\n"
     
-    keyboard = [
-        [InlineKeyboardButton("🔄 Return Item", callback_data="main_return")],
-        [InlineKeyboardButton("🎯 Rent More", callback_data="quick_rent")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    message += "─────────────────\n"
+    message += "*💡 Tips:*\n"
+    message += "• You can rent the same item multiple times\n"
+    message += "• Each rental is tracked separately\n"
+    message += "• Use /return when you're ready to return\n"
+    message += "• Use /rent to rent more items"
     
     await query.edit_message_text(
         message, 
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        parse_mode='Markdown'
     )
 
 async def main_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -702,23 +900,44 @@ Need assistance? Contact your tech ministry leader! 🙏
     await query.edit_message_text(help_text, parse_mode='Markdown')
 
 async def quick_rent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Quick rent button handler"""
+    """Quick rent button handler - starts rental process"""
     query = update.callback_query
     await query.answer()
     
-    keyboard = [
-        [InlineKeyboardButton("📦 Browse by Category", callback_data="rent_browse")],
-        [InlineKeyboardButton("🔍 I know the Item ID", callback_data="rent_manual")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="rent_cancel")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    user = query.from_user
     
-    await query.edit_message_text(
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await query.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    # Check if user has overdue items
+    has_overdue, overdue_rental = sheets.user_has_overdue_items(user.id)
+    if has_overdue:
+        await query.message.reply_text(
+            f"❌ *You have an overdue item that must be returned first:*\n\n"
+            f"📦 Item: {overdue_rental.get('Item Name', 'Unknown')}\n"
+            f"🆔 ID: `{overdue_rental.get('Item ID', 'N/A')}`\n"
+            f"🗓️ Was due: {overdue_rental.get('Expected Return Date', 'N/A')}\n\n"
+            "⚠️ Please return this item before renting more equipment.\n\n"
+            "Use /return to return your overdue item.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    await query.message.reply_text(
         "🎯 *Let's rent some equipment!*\n\n"
-        "How would you like to find your item?",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        "Enter the *Item ID* (e.g., CAB001)\n\n"
+        "💡 Use /list for equipment list\n"
+        "Type /cancel to cancel.",
+        parse_mode='Markdown'
     )
+    
+    return WAITING_FOR_ITEM_ID
 
 async def main_return_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle return from main menu"""
@@ -726,6 +945,16 @@ async def main_return_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     user = query.from_user
+    
+    # Check if user is verified
+    if not is_user_verified(user.id):
+        await query.message.reply_text(
+            "🔒 *Verification Required*\n\n"
+            "Please use /start and enter the password first.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
     rentals = sheets.get_active_rentals_by_user(user.id)
     
     if not rentals:
@@ -811,6 +1040,9 @@ __all__ = [
     'start', 'help_command', 'rent_start', 'my_rentals', 'return_start',
     'receive_item_id', 'receive_duration', 'receive_pickup_photo',
     'receive_return_choice', 'receive_return_photo', 'cancel',
+    'handle_duration_selection', 'rent_cancel_callback', 'return_cancel_callback',
+    'main_myrentals_callback', 'main_help_callback', 'quick_rent_callback',
+    'main_return_callback', 'main_admin_callback',
     'WAITING_FOR_ITEM_ID', 'WAITING_FOR_DURATION', 'WAITING_FOR_DURATION_CUSTOM',
     'WAITING_FOR_PICKUP_PHOTO', 'WAITING_FOR_RETURN_CHOICE', 'WAITING_FOR_RETURN_PHOTO'
 ]

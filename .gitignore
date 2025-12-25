@@ -46,6 +46,12 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and Process Files
 *.log
+*.pid
+bot_live.log
+bot_output.log
+bot_startup.log
+bot.log
+bot.pid
 
