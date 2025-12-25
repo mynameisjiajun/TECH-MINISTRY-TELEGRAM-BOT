@@ -67,7 +67,8 @@ echo Press Ctrl+C to stop the bot
 echo.
 
 REM Run the bot
-python main.py
+cd ..
+python run.py
 
 pause
 

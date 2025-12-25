@@ -5,6 +5,9 @@ Run this before starting the main bot
 import sys
 import os
 
+# Add src directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
 def test_python_version():
     """Test if Python version is compatible"""
     print("🔍 Checking Python version...")

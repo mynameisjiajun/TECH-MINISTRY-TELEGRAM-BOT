@@ -68,5 +68,6 @@ echo "Press Ctrl+C to stop the bot"
 echo ""
 
 # Run the bot
-python3 main.py
+cd ..
+python3 run.py
 
